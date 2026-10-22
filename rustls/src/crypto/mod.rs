@@ -410,6 +410,22 @@ pub trait SupportedKxGroup: Send + Sync + Debug {
         FfdheGroup::from_named_group(self.name())
     }
 
+    /// Start a TLS 1.2 client key exchange in an arbitrary, server-chosen FFDHE group.
+    ///
+    /// Only consulted when no group's [`ffdhe_group()`](Self::ffdhe_group) exactly
+    /// matches the server's parameters. Return `None` to decline (the default).
+    ///
+    /// ovrc patch: rustls only does DHE in RFC 7919 named groups, but old
+    /// devices send their own (often 1024-bit) primes, and a provider can't
+    /// see the server's group without this hook. Temporary: only needed until
+    /// the wasm host can do TLS handshakes for insecure connections itself.
+    fn start_ffdhe(
+        &self,
+        _group: FfdheGroup<'_>,
+    ) -> Option<Result<Box<dyn ActiveKeyExchange>, Error>> {
+        None
+    }
+
     /// Named group the SupportedKxGroup operates in.
     ///
     /// If the `NamedGroup` enum does not have a name for the algorithm you are implementing,

@@ -949,29 +949,38 @@ impl State<ClientConnectionData> for ExpectServerDone<'_> {
             cx.common,
             &st.server_kx.kx_params,
         )?;
-        let maybe_skxg = match &kx_params {
+        let maybe_kx = match &kx_params {
             ServerKeyExchangeParams::Ecdh(ecdh) => st
                 .config
-                .find_kx_group(ecdh.curve_params.named_group, ProtocolVersion::TLSv1_2),
+                .find_kx_group(ecdh.curve_params.named_group, ProtocolVersion::TLSv1_2)
+                .map(|skxg| (skxg, skxg.start())),
             ServerKeyExchangeParams::Dh(dh) => {
                 let ffdhe_group = dh.as_ffdhe_group();
+                let kx_groups = &st.config.provider.kx_groups;
 
-                st.config
-                    .provider
-                    .kx_groups
+                kx_groups
                     .iter()
                     .find(|kxg| kxg.ffdhe_group() == Some(ffdhe_group))
-                    .copied()
+                    .map(|skxg| (*skxg, skxg.start()))
+                    // ovrc patch: no exact match, so offer the server's own DH
+                    // group to any kx group that opts in via `start_ffdhe`. See
+                    // `SupportedKxGroup::start_ffdhe` for why.
+                    .or_else(|| {
+                        kx_groups.iter().find_map(|skxg| {
+                            skxg.start_ffdhe(ffdhe_group)
+                                .map(|kx| (*skxg, kx))
+                        })
+                    })
             }
         };
-        let Some(skxg) = maybe_skxg else {
+        let Some((skxg, kx)) = maybe_kx else {
             return Err(cx.common.send_fatal_alert(
                 AlertDescription::IllegalParameter,
                 PeerMisbehaved::SelectedUnofferedKxGroup,
             ));
         };
         cx.common.kx_state = KxState::Start(skxg);
-        let kx = skxg.start()?;
+        let kx = kx?;
 
         // 4b.
         let mut transcript = st.transcript;
